@@ -125,18 +125,16 @@ void execArgsPiped(char** parsed, char** parsedfunc)
     }
 }
 
+/*
+ *
+ *
+ */
 void execArgsOutRedir(char** parsed, char** parsedfunc) {
 
     pid_t pid;
     struct sigaction act;
     act.sa_handler = sigint;
     int fd;
-    int i = 0;
-    
-    while(parsedfunc[i] != NULL) {
-        i++;
-    }
-    i--;
     
     pid = fork();
     if(pid < 0) {
@@ -145,7 +143,7 @@ void execArgsOutRedir(char** parsed, char** parsedfunc) {
         // Error forking
     } else if(pid == 0) {
         // Child
-        if((fd = open(parsedfunc[i], O_CREAT|O_TRUNC|O_WRONLY, 0644)) < 0) {
+        if((fd = open(parsedfunc[strlen(*parsedfunc)], O_CREAT|O_TRUNC|O_WRONLY, 0644)) < 0) {
             perror(parsedfunc[i]);
             exit(1);
         }
@@ -285,6 +283,10 @@ int parseFunc(char** args, char** parsed)
     return flag + 1;
 }
 
+/*
+ *
+ *
+ */
 #define LSH_TOK_BUFSIZE 64
 #define LSH_TOK_DELIM " \t\r\n\a"
 char **lsh_split_line(char *line)
