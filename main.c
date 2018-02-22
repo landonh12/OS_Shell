@@ -18,17 +18,16 @@
 int offset = 0;
  
 // Function to take input
-int takeInput(char* str)
+char* takeInput(void)
 {
     char* buf;
  
     buf = readline("$ ");
     if (strlen(buf) != 0) {
         add_history(buf);
-        strcpy(str, buf);
-        return 0;
+        return buf;
     } else {
-        return 1;
+        return NULL;
     }
 }
  
@@ -132,7 +131,13 @@ void execArgsOutRedir(char** parsed, char** parsedfunc) {
     struct sigaction act;
     act.sa_handler = sigint;
     int fd;
-
+    int i = 0;
+    
+    while(parsedfunc[i] != NULL) {
+        i++;
+    }
+    i--;
+    
     pid = fork();
     if(pid < 0) {
         printf("\nCould not fork");
@@ -140,12 +145,12 @@ void execArgsOutRedir(char** parsed, char** parsedfunc) {
         // Error forking
     } else if(pid == 0) {
         // Child
-        if((fd = open(parsedfunc[1], O_CREAT|O_TRUNC|O_WRONLY, 0644)) < 0) {
-            perror(parsedfunc[1]);
+        if((fd = open(parsedfunc[i], O_CREAT|O_TRUNC|O_WRONLY, 0644)) < 0) {
+            perror(parsedfunc[i]);
             exit(1);
         }
         fflush(0);
-        dup2(fd, 1);
+        dup2(fd, STDOUT_FILENO);
         if(execvp(parsedfunc[0], parsedfunc) < 0) {
             printf("\nCould not execute command..");
             exit(0);
@@ -249,82 +254,87 @@ int ownCmdHandler(char** parsed)
 }
  
 // function for finding cmd func
-int parseFunc(char* str, char** strfunc)
+int parseFunc(char** args, char** parsed)
 {
-    int i;
-    for (i = 0; i < 2; i++) {
-        strfunc[i] = strsep(&str, "|");
-        strfunc[i] = strsep(&str, ">");
-        strfunc[i] = strsep(&str, ">>");
-        strfunc[i] = strsep(&str, "<");
-        if (strfunc[i] == NULL)
-            break;
+    int i = 0;
+    int flag = 0;
+    
+    while(args[i] != NULL) {
+        if(strcmp(args[i], "|") == 0) {
+            flag = 1;
+            i++;
+            parsed[i] = args[i];
+        } else if(strcmp(args[i], ">") == 0) {
+            flag = 2;
+            i++;
+            parsed[i] = args[i];
+        } else if(strcmp(args[i], ">>") == 0) {
+            flag = 3;
+            i++;
+            parsed[i] = args[i];
+        } else if(strcmp(args[i], "<") == 0) {
+            flag = 4;
+            i++;
+            parsed[i] = args[i];
+        } else {
+            parsed[i] = args[i];
+        }
+        i++;
     }
- 
-    if (strfunc[1] == NULL)
-        return 0; // returns zero if no pipe is found.
-    else if(strcmp(strfunc[1], "|") == 1) {
-        return 1; // returns 1 if pipe is found.
-    } else if(strcmp(strfunc[1], ">") == 1) {
-        return 2; // returns 2 if output redirection is found.
-    } else if(strcmp(strfunc[1], ">>") == 1) {
-        return 3; // returns 3 if append is found.
-    } else if(strcmp(strfunc[1], "<") == 1) {
-        return 4; // returns 4 if input redirection is found.
-    } 
+    
+    return flag + 1;
 }
- 
-// function for parsing command words
-void parseSpace(char* str, char** parsed)
-{
-    int i;
- 
-    for (i = 0; i < MAXLIST; i++) {
-        parsed[i] = strsep(&str, " ");
- 
-        if (parsed[i] == NULL)
-            break;
-        if (strlen(parsed[i]) == 0)
-            i--;
-    }
-}
- 
-int processString(char* str, char** parsed, char** parsedfunc)
-{
- 
-    char* strfunc[2];
-    int func = 0;
 
-    func = parseFunc(str, strfunc);
-
-    if (func) {
-        parseSpace(strfunc[0], parsed);
-        parseSpace(strfunc[1], parsedfunc);
-    } else {
-        parseSpace(str, parsed);
+#define LSH_TOK_BUFSIZE 64
+#define LSH_TOK_DELIM " \t\r\n\a"
+char **lsh_split_line(char *line)
+{
+    int bufsize = LSH_TOK_BUFSIZE, position = 0;
+    char **tokens = malloc(bufsize * sizeof(char*));
+    char *token;
+    
+    if (!tokens) {
+        fprintf(stderr, "lsh: allocation error\n");
+        exit(EXIT_FAILURE);
     }
-    if (ownCmdHandler(parsed))
-        return 0;
-    else
-        return 1 + func;
+    
+    token = strtok(line, LSH_TOK_DELIM);
+    while (token != NULL) {
+        tokens[position] = token;
+        position++;
+        
+        if (position >= bufsize) {
+            bufsize += LSH_TOK_BUFSIZE;
+            tokens = realloc(tokens, bufsize * sizeof(char*));
+            if (!tokens) {
+                fprintf(stderr, "lsh: allocation error\n");
+                exit(EXIT_FAILURE);
+            }
+        }
+        
+        token = strtok(NULL, LSH_TOK_DELIM);
+    }
+    tokens[position] = NULL;
+    return tokens;
 }
  
 int main()
 {
     int execFlag = 0;
-    char inputString[MAXCOM], *parsedArgs[MAXLIST];
-    char* parsedArgsFunc[MAXLIST];
+    char *inputString, **inputArgs;
+    char *parsedArgs[MAXLIST];
     while (1) {
         // Ignore SIGINT
         signal(SIGINT, SIG_IGN);
         // print shell line
         printDir(); 
         // take input
-        if (takeInput(inputString))
+        inputString = takeInput();
+        if (inputString == NULL)
             continue;
         // process
-        execFlag = processString(inputString,
-        parsedArgs, parsedArgsFunc);
+        inputArgs = lsh_split_line(inputString);
+        execFlag = parseFunc(inputArgs, parsedArgs);
         // execflag returns zero if there is no command
         // or it is a builtin command,
         // 1 if it is a simple command
@@ -334,20 +344,23 @@ int main()
         // 5 if it includes input redirection.
         
         // execute
-        if(execFlag == 1)
-            execArgs(parsedArgs);
+        if(execFlag == 1) {
+            if(!ownCmdHandler(parsedArgs)) {
+                execArgs(parsedArgs);
+            }
+        }
  
         if(execFlag == 2)
-            execArgsPiped(parsedArgs, parsedArgsFunc);
+            execArgsPiped(inputArgs, parsedArgs);
 
         if(execFlag == 3)
-            execArgsOutRedir(parsedArgs, parsedArgsFunc);
+            execArgsOutRedir(inputArgs, parsedArgs);
 
         if(execFlag == 4)
-            execArgsAppend(parsedArgs, parsedArgsFunc);
+            execArgsAppend(inputArgs, parsedArgs);
 
         if(execFlag == 5)
-            execArgsInRedir(parsedArgs, parsedArgsFunc);
+            execArgsInRedir(inputArgs, parsedArgs);
 
         offset++;
     }
