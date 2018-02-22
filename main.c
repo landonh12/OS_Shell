@@ -144,7 +144,7 @@ void execArgsOutRedir(char** parsed, char** parsedfunc) {
     } else if(pid == 0) {
         // Child
         if((fd = open(parsedfunc[strlen(*parsedfunc)], O_CREAT|O_TRUNC|O_WRONLY, 0644)) < 0) {
-            perror(parsedfunc[i]);
+            perror(parsedfunc[strlen(*parsedfunc)]);
             exit(1);
         }
         fflush(0);
