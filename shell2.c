@@ -71,46 +71,184 @@ int executeCommand(char** cmd1, char** cmd2, char* infile1, char* infile2,
 					char* outfile1, char* outfile2, char* appendfile1,
 					char* appendfile2) {
 	
-	pid_t pid;
+	pid_t pid1, pid2;
 	int fdin, fdout;
+	int pipefd[2];
+	int i = 0;
+	int j = 0;
+	int k = 0;
+	char* hist = "\0";
+	int offset = 0;
 	
-	pid = fork();
-	if(pid < 0) {
-		printf("\nCould not fork");
+	if(strcmp(cmd1[0], "cd") == 0) {
+		if(cmd1[1] == NULL) {
+			chdir(getenv("HOME"));
+		} else {
+			chdir(cmd1[1]);
+		}
 		return 1;
-		// Error forking
-	} else if(pid == 0) {
-		if(strcmp(outfile1, "\0") != 0) {
-			if((fdout = open(outfile1, O_CREAT|O_TRUNC|O_WRONLY, 0644)) < 0) {
-				perror(outfile1);
-				exit(1);
+	} else if(strcmp(cmd1[0], "history") == 0) {
+		k = where_history();
+		k += offset;
+		j = k;
+		i = 0;
+		while(k > j - 10) {
+			if(history_get(k) != NULL) {
+				hist = history_get(k)->line;
+				printf("%d: %s\n", i, hist);
 			}
-			fflush(0);
-			dup2(fdout, STDOUT_FILENO);
-		} if(strcmp(appendfile1, "\0") != 0) {
-			if((fdout = open(appendfile1, O_CREAT|O_WRONLY|O_APPEND, 0644)) < 0) {
-				perror(appendfile1);
-				exit(1);
-			}
-			fflush(0);
-			dup2(fdout, STDOUT_FILENO);
-		} if(strcmp(infile1, "\0") != 0) {
-			if((fdin = open(infile1, O_RDONLY)) < 0) {
-				perror(infile1);
-				exit(1);
-			}
-			fflush(0);
-			dup2(fdin, STDIN_FILENO);
+			i++;
+			k--;
 		}
-		if(execvp(cmd1[0], cmd1) < 0) {
-			printf("\nCould not execute command..");
-			exit(0);
+		return 1;
+	}
+	
+	if(cmd2[0] == NULL) {	
+		pid1 = fork();
+		if(pid1 < 0) {
+			printf("\nCould not fork");
+			return 1;
+			// Error forking
+		} else if(pid1 == 0) {
+			if(strcmp(outfile1, "\0") != 0) {
+				if((fdout = open(outfile1, O_CREAT|O_TRUNC|O_WRONLY, 0644)) < 0) {
+					perror(outfile1);
+					exit(1);
+				}
+				fflush(0);
+				dup2(fdout, STDOUT_FILENO);
+				close(fdout);
+			} if(strcmp(appendfile1, "\0") != 0) {
+				if((fdout = open(appendfile1, O_CREAT|O_WRONLY|O_APPEND, 0644)) < 0) {
+					perror(appendfile1);
+					exit(1);
+				}
+				fflush(0);
+				dup2(fdout, STDOUT_FILENO);
+				close(fdout);
+			} if(strcmp(infile1, "\0") != 0) {
+				if((fdin = open(infile1, O_RDONLY)) < 0) {
+					perror(infile1);
+					exit(1);
+				}
+				fflush(0);
+				dup2(fdin, STDIN_FILENO);
+				close(fdin);
+			}
+			if(execvp(cmd1[0], cmd1) < 0) {
+				printf("\nCould not execute command..");
+				exit(0);
+			}
+	
+		} else {
+			// Parent
+			wait(NULL);
+			return 1;
 		}
-
 	} else {
-		// Parent
-		wait(NULL);
-		return 1;
+		
+		if (pipe(pipefd) < 0) {
+			printf("\nPipe could not be initialized");
+			return 0;
+		}
+		
+		pid1 = fork();
+		
+		if (pid1 < 0) {
+			printf("\nCould not fork");
+			return 0;
+		}
+	 
+		if (pid1 == 0) {
+			// Child 1 executing..
+			// It only needs to write at the write end
+			close(pipefd[0]);
+			dup2(pipefd[1], STDOUT_FILENO);
+			close(pipefd[1]);
+			
+			if(strcmp(outfile1, "\0") != 0) {
+				if((fdout = open(outfile1, O_CREAT|O_TRUNC|O_WRONLY, 0644)) < 0) {
+					perror(outfile1);
+					exit(1);
+				}
+				fflush(0);
+				dup2(fdout, STDOUT_FILENO);
+				close(fdout);
+			} if(strcmp(appendfile1, "\0") != 0) {
+				if((fdout = open(appendfile1, O_CREAT|O_WRONLY|O_APPEND, 0644)) < 0) {
+					perror(appendfile1);
+					exit(1);
+				}
+				fflush(0);
+				dup2(fdout, STDOUT_FILENO);
+				close(fdout);
+			} if(strcmp(infile1, "\0") != 0) {
+				if((fdin = open(infile1, O_RDONLY)) < 0) {
+					perror(infile1);
+					exit(1);
+				}
+				fflush(0);
+				dup2(fdin, STDIN_FILENO);
+				close(fdin);
+			}
+	 
+			if (execvp(cmd1[0], cmd1) < 0) {
+				printf("\nCould not execute command 1..");
+				exit(0);
+			}
+			
+		} else {
+			// Parent executing
+			pid2 = fork();
+	 
+			if (pid2 < 0) {
+				printf("\nCould not fork");
+				return 0;
+			}
+	 
+			// Child 2 executing..
+			// It only needs to read at the read end
+			if (pid2 == 0) {
+				close(pipefd[1]);
+				dup2(pipefd[0], STDIN_FILENO);
+				close(pipefd[0]);
+				
+				if(strcmp(outfile2, "\0") != 0) {
+					if((fdout = open(outfile2, O_CREAT|O_TRUNC|O_WRONLY, 0644)) < 0) {
+						perror(outfile1);
+						exit(1);
+					}
+					fflush(0);
+					dup2(fdout, STDOUT_FILENO);
+					close(fdout);
+				} if(strcmp(appendfile2, "\0") != 0) {
+					if((fdout = open(appendfile2, O_CREAT|O_WRONLY|O_APPEND, 0644)) < 0) {
+						perror(appendfile1);
+						exit(1);
+					}
+					fflush(0);
+					dup2(fdout, STDOUT_FILENO);
+					close(fdout);
+				} if(strcmp(infile2, "\0") != 0) {
+					if((fdin = open(infile2, O_RDONLY)) < 0) {
+						perror(infile1);
+						exit(1);
+					}
+					fflush(0);
+					dup2(fdin, STDIN_FILENO);
+					close(fdin);
+				}
+				
+				if (execvp(cmd2[0], cmd2) < 0) {
+					printf("\nCould not execute command 2..");
+					exit(0);
+				}
+			} else {
+				// parent executing, waiting for two children
+				wait(NULL);
+				wait(NULL);
+			}
+		}
 	}
 }
 
@@ -209,6 +347,9 @@ int main() {
 	
 	while(1) {
 		line = readCommand();
+		if(line == NULL) {
+			continue;
+		}
 		args = splitLine(line);
 		launchCommand(args);
 	}
