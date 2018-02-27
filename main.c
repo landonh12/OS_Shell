@@ -66,6 +66,7 @@ char** splitLine(char* line) {
  * Description: Executes the specified command entered by the user.
  *              Will do input/output redirection as well as piping.
  *              Supports i/o redirection on both sides of the pipe.
+ *              Also supports running processes in the background.
  */
 int executeCommand(char** cmd1, char** cmd2, char* infile1, char* infile2,
 					char* outfile1, char* outfile2, char* appendfile1,
@@ -231,7 +232,7 @@ int executeCommand(char** cmd1, char** cmd2, char* infile1, char* infile2,
 				// Output redirection on child 2
 				if(strcmp(outfile2, "\0") != 0) {
 					if((fdout = open(outfile2, O_CREAT|O_TRUNC|O_WRONLY, 0644)) < 0) {
-						perror(outfile1);
+						perror(outfile2);
 						exit(1);
 					}
 					fflush(0);
@@ -240,7 +241,7 @@ int executeCommand(char** cmd1, char** cmd2, char* infile1, char* infile2,
                 // Append redirection on child 2
 				} if(strcmp(appendfile2, "\0") != 0) {
 					if((fdout = open(appendfile2, O_CREAT|O_WRONLY|O_APPEND, 0644)) < 0) {
-						perror(appendfile1);
+						perror(appendfile2);
 						exit(1);
 					}
 					fflush(0);
@@ -249,7 +250,7 @@ int executeCommand(char** cmd1, char** cmd2, char* infile1, char* infile2,
                 // Input redirection on child 2
 				} if(strcmp(infile2, "\0") != 0) {
 					if((fdin = open(infile2, O_RDONLY)) < 0) {
-						perror(infile1);
+						perror(infile2);
 						exit(1);
 					}
 					fflush(0);
@@ -366,6 +367,12 @@ int launchCommand(char** args) {
 	return 1;
 }
 
+void sigusr1_handler(int signum) {
+    if(signum == SIGUSR1) {
+        kill(getpid(), SIGUSR1);
+    }
+}
+
 /*
  * Function:	int main()
  * Description:	Main function. Contains the
@@ -379,7 +386,8 @@ int main() {
 	
 	while(1) {
         signal(SIGINT, SIG_IGN);
-		line = readCommand();
+		signal(SIGUSR1, sigusr1_handler);
+        line = readCommand();
 		if(line == NULL) {
 			continue;
 		}
