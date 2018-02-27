@@ -1,370 +1,391 @@
-// C Program to design a shell in Linux
-#include<stdio.h>
-#include<string.h>
-#include<stdlib.h>
-#include<unistd.h>
-#include<sys/types.h>
-#include<sys/wait.h>
-#include<readline/readline.h>
-#include<readline/history.h>
-#include<fcntl.h>
+/*
+ *	       File: shell.c
+ *	     Author: Landon Haugh (lrh282)
+ *	Description: Custom shell program for Operating Systems I
+ *				 taught by Thomas Ritter. This shell supports
+ * 				 input/output redirection, append, piping,
+ * 				 background processing, SIGINT ingoring,
+ * 				 and builtin commands (cd, history).
+ *
+ *	Due Date: 2-27-18
+ *
+ */
 
-#define MAXCOM 1000 // max number of letters to be supported
-#define MAXLIST 100 // max number of commands to be supported
- 
-// Clearing the shell using escape sequences
-#define clear() printf("\033[H\033[J")
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <readline/readline.h>
+#include <readline/history.h>
+#include <fcntl.h>
 
 int offset = 0;
- 
-// Function to take input
-char* takeInput(void)
-{
-    char* buf;
- 
-    buf = readline("$ ");
-    if (strlen(buf) != 0) {
-        add_history(buf);
-        return buf;
-    } else {
-        return NULL;
-    }
-}
- 
-// Function to print Current Directory.
-void printDir()
-{
-    char cwd[1024];
-    getcwd(cwd, sizeof(cwd));
-    printf("\n%s:", cwd);
-}
 
-void sigint(int signo) {
-    signal(SIGINT,sigint);
-    printf("CHILD: I have received a SIGINT\n");
-    return;
-}
- 
-// Function where the system command is executed
-void execArgs(char** parsed)
-{
-    struct sigaction act;
-    act.sa_handler = sigint;
-
-    // Forking a child
-    pid_t pid = fork(); 
- 
-    if (pid == -1) {
-        printf("\nFailed forking child..");
-        return;
-    } else if (pid == 0) {
-        if (execvp(parsed[0], parsed) < 0) {
-            printf("\nCould not execute command..");
-        }
-        exit(0);
-    } else {
-        // waiting for child to terminate
-        sigaction(SIGINT, &act, NULL);
-        wait(NULL); 
-        return;
-    }
-}
- 
-// Function where the piped system commands is executed
-void execArgsPiped(char** parsed, char** parsedfunc)
-{
-    // 0 is read end, 1 is write end
-    int pipefd[2]; 
-    pid_t p1, p2;
- 
-    if (pipe(pipefd) < 0) {
-        printf("\nPipe could not be initialized");
-        return;
-    }
-    p1 = fork();
-    if (p1 < 0) {
-        printf("\nCould not fork");
-        return;
-    }
- 
-    if (p1 == 0) {
-        // Child 1 executing..
-        // It only needs to write at the write end
-        close(pipefd[0]);
-        dup2(pipefd[1], STDOUT_FILENO);
-        close(pipefd[1]);
- 
-        if (execvp(parsed[0], parsed) < 0) {
-            printf("\nCould not execute command 1..");
-            exit(0);
-        }
-    } else {
-        // Parent executing
-        p2 = fork();
- 
-        if (p2 < 0) {
-            printf("\nCould not fork");
-            return;
-        }
- 
-        // Child 2 executing..
-        // It only needs to read at the read end
-        if (p2 == 0) {
-            close(pipefd[1]);
-            dup2(pipefd[0], STDIN_FILENO);
-            close(pipefd[0]);
-            if (execvp(parsedfunc[0], parsedfunc) < 0) {
-                printf("\nCould not execute command 2..");
-                exit(0);
-            }
-        } else {
-            // parent executing, waiting for two children
-            wait(NULL);
-            wait(NULL);
-        }
-    }
+/*
+ * Function: 	void readCommand(void)
+ * Description: Returns a char* buffer from user input.
+ */
+char* readCommand() {
+	char* buf;
+	buf = readline("\n$ ");
+	if (strlen(buf) != 0) {
+		add_history(buf);
+		return buf;
+	} else {
+		return NULL;
+	}	
 }
 
 /*
- *
- *
+ * Function:    char** splitLine(char*)
+ * Description: Returns a char** array formed from tokenizing
+ * 				a char* array.
  */
-void execArgsOutRedir(char** parsed, char** parsedfunc) {
-
-    pid_t pid;
-    struct sigaction act;
-    act.sa_handler = sigint;
-    int fd;
-    
-    pid = fork();
-    if(pid < 0) {
-        printf("\nCould not fork");
-        return;
-        // Error forking
-    } else if(pid == 0) {
-        // Child
-        if((fd = open(parsedfunc[strlen(*parsedfunc)], O_CREAT|O_TRUNC|O_WRONLY, 0644)) < 0) {
-            perror(parsedfunc[strlen(*parsedfunc)]);
-            exit(1);
-        }
-        fflush(0);
-        dup2(fd, STDOUT_FILENO);
-        if(execvp(parsedfunc[0], parsedfunc) < 0) {
-            printf("\nCould not execute command..");
-            exit(0);
-        }
-    } else {
-        // Parent
-        sigaction(SIGINT, &act, NULL);
-        wait(NULL);
-        return;
-    }
-
+#define BUFSIZE 64
+char** splitLine(char* line) {
+	
+	char* token;
+	char** args = malloc(BUFSIZE * sizeof(char*));
+	int i = 0;
+	
+	token = strtok(line, " ");
+	while(token != NULL) {
+		args[i] = token;
+		token = strtok(NULL, " ");
+		i++;
+	}
+	return args;
+	
 }
 
-void execArgsAppend(char** parsed, char** parsedfunc) {
-
-}
-
-void execArgsInRedir(char** parsed, char** parsedfunc) {
-
-}
- 
-// Help command builtin
-void openHelp()
-{
-    puts("\n***WELCOME TO MY SHELL HELP***"
-        "\nCopyright @ Suprotik Dey"
-        "\n-Use the shell at your own risk..."
-        "\nList of Commands supported:"
-        "\n>cd"
-        "\n>ls"
-        "\n>exit"
-        "\n>all other general commands available in UNIX shell"
-        "\n>pipe handling"
-        "\n>improper space handling");
- 
-    return;
-}
- 
-// Function to execute builtin commands
-int ownCmdHandler(char** parsed)
-{
-    int NoOfOwnCmds = 5, i, switchOwnArg = 0;
-    char* ListOfOwnCmds[NoOfOwnCmds];
-    char* username;
-    char* hist;
-    int k = 0;
-    int j = 0;
-
-    ListOfOwnCmds[0] = "exit";
-    ListOfOwnCmds[1] = "cd";
-    ListOfOwnCmds[2] = "help";
-    ListOfOwnCmds[3] = "hello";
-    ListOfOwnCmds[4] = "history";
- 
-    for (i = 0; i < NoOfOwnCmds; i++) {
-        if (strcmp(parsed[0], ListOfOwnCmds[i]) == 0) {
-            switchOwnArg = i + 1;
-            break;
-        }
-    }
- 
-    switch (switchOwnArg) {
-    case 1:
-        printf("\nGoodbye\n");
+/*
+ * Function:	int* executeCommand(char**, char**, char*, char*, char*,
+ *                                  char*, char*, char*)
+ * Description: Executes the specified command entered by the user.
+ *              Will do input/output redirection as well as piping.
+ *              Supports i/o redirection on both sides of the pipe.
+ */
+int executeCommand(char** cmd1, char** cmd2, char* infile1, char* infile2,
+					char* outfile1, char* outfile2, char* appendfile1,
+					char* appendfile2, int bg) {
+	
+	pid_t pid1, pid2;
+	int fdin, fdout;
+	int pipefd[2];
+	int i = 0;
+	int j = 0;
+	int k = 0;
+	char* hist = "\0";
+	
+    // Execute builtin commands if specified
+    // cd
+	if(strcmp(cmd1[0], "cd") == 0) {
+		if(cmd1[1] == NULL) {
+			chdir(getenv("HOME"));
+		} else {
+			chdir(cmd1[1]);
+		}
+		return 1;
+    // history
+	} else if(strcmp(cmd1[0], "history") == 0) {
+		k = where_history();
+		k += offset;
+		j = k;
+		i = 0;
+		while(k > j - 10) {
+			if(history_get(k) != NULL) {
+				hist = history_get(k)->line;
+				printf("%d: %s\n", i, hist);
+			}
+			i++;
+			k--;
+		}
+		return 1;
+    } else if(strcmp(cmd1[0], "exit") == 0) {
+        printf("Exiting..\n");
         exit(0);
-    case 2:
-        if(parsed[1] == NULL) {
-            chdir(getenv("HOME"));
-        }
-        chdir(parsed[1]);
-        return 1;
-    case 3:
-        openHelp();
-        return 1;
-    case 4:
-        username = getenv("USER");
-        printf("\nHello %s.\nMind that this is "
-            "not a place to play around."
-            "\nUse help to know more..\n",
-            username);
-        return 1;
-    case 5:
-        k = where_history();
-        k += offset;
-        j = k;
-        i = 0;
-        while(k > j - 10) {
-            if(history_get(k) != NULL) {
-                hist = history_get(k)->line;
-                printf("%d: %s\n", i, hist);
-            }
-            i++;
-            k--;
-        }
-        return 1;
-    default:
-        break;
     }
- 
-    return 0;
+	
+    // Determine whether or not piping occurs.
+	if(cmd2[0] == NULL) {
+        // Fork
+		pid1 = fork();
+        // If fork fails
+		if(pid1 < 0) {
+			printf("\nCould not fork");
+			return 1;
+        // If fork works, then run this code in the child
+		} else if(pid1 == 0) {
+            // If output redirection is present
+			if(strcmp(outfile1, "\0") != 0) {
+				if((fdout = open(outfile1, O_CREAT|O_TRUNC|O_WRONLY, 0644)) < 0) {
+					perror(outfile1);
+					exit(1);
+				}
+				fflush(0);
+				dup2(fdout, STDOUT_FILENO);
+				close(fdout);
+            // If append redirection is present
+			} if(strcmp(appendfile1, "\0") != 0) {
+				if((fdout = open(appendfile1, O_CREAT|O_WRONLY|O_APPEND, 0644)) < 0) {
+					perror(appendfile1);
+					exit(1);
+				}
+				fflush(0);
+				dup2(fdout, STDOUT_FILENO);
+				close(fdout);
+            // If input redirection is present
+			} if(strcmp(infile1, "\0") != 0) {
+				if((fdin = open(infile1, O_RDONLY)) < 0) {
+					perror(infile1);
+					exit(1);
+				}
+				fflush(0);
+				dup2(fdin, STDIN_FILENO);
+				close(fdin);
+			}
+            // Execute command
+			if(execvp(cmd1[0], cmd1) < 0) {
+				printf("\nCould not execute command..");
+				exit(0);
+			}
+        // Wait in the parent
+		} else {
+            int status;
+            if(bg == 0)
+                waitpid(pid1, &status, 0);
+            return 1;
+		}
+    // If piping is present
+	} else {
+		
+        // Make sure the pipe doesn't fail
+		if (pipe(pipefd) < 0) {
+			printf("\nPipe could not be initialized");
+			return 1;
+		}
+		
+        // Fork for 1st child
+		pid1 = fork();
+		
+        // If fork fails
+		if (pid1 < 0) {
+			printf("\nCould not fork");
+			return 1;
+        // Run child 1 if fork works
+        } else if (pid1 == 0) {
+			// Child 1 executing..
+			// It only needs to write at the write end
+			dup2(pipefd[1], STDOUT_FILENO);
+			close(pipefd[1]);
+            close(pipefd[0]);
+			
+            // Output redirection
+			if(strcmp(outfile1, "\0") != 0) {
+				if((fdout = open(outfile1, O_CREAT|O_TRUNC|O_WRONLY, 0644)) < 0) {
+					perror(outfile1);
+					exit(1);
+				}
+				fflush(0);
+				dup2(fdout, STDOUT_FILENO);
+				close(fdout);
+            // Append redirection
+			} if(strcmp(appendfile1, "\0") != 0) {
+				if((fdout = open(appendfile1, O_CREAT|O_WRONLY|O_APPEND, 0644)) < 0) {
+					perror(appendfile1);
+					exit(1);
+				}
+				fflush(0);
+				dup2(fdout, STDOUT_FILENO);
+				close(fdout);
+            // Input redirection
+			} if(strcmp(infile1, "\0") != 0) {
+				if((fdin = open(infile1, O_RDONLY)) < 0) {
+					perror(infile1);
+					exit(1);
+				}
+				fflush(0);
+				dup2(fdin, STDIN_FILENO);
+				close(fdin);
+            // Execute command
+			} if (execvp(cmd1[0], cmd1) < 0) {
+				printf("\nCould not execute command 1..");
+				exit(0);
+			}
+        // Child 1 is now the parent of child 2
+		} else {
+			// Fork child 2
+			pid2 = fork();
+            // If child 2 fork fails
+			if (pid2 < 0) {
+				printf("\nCould not fork");
+				return 1;
+            // Execute child 2
+            } if (pid2 == 0) {
+                // Piping
+				dup2(pipefd[0], STDIN_FILENO);
+				close(pipefd[0]);
+                close(pipefd[1]);
+				// Output redirection on child 2
+				if(strcmp(outfile2, "\0") != 0) {
+					if((fdout = open(outfile2, O_CREAT|O_TRUNC|O_WRONLY, 0644)) < 0) {
+						perror(outfile1);
+						exit(1);
+					}
+					fflush(0);
+					dup2(fdout, STDOUT_FILENO);
+					close(fdout);
+                // Append redirection on child 2
+				} if(strcmp(appendfile2, "\0") != 0) {
+					if((fdout = open(appendfile2, O_CREAT|O_WRONLY|O_APPEND, 0644)) < 0) {
+						perror(appendfile1);
+						exit(1);
+					}
+					fflush(0);
+					dup2(fdout, STDOUT_FILENO);
+					close(fdout);
+                // Input redirection on child 2
+				} if(strcmp(infile2, "\0") != 0) {
+					if((fdin = open(infile2, O_RDONLY)) < 0) {
+						perror(infile1);
+						exit(1);
+					}
+					fflush(0);
+					dup2(fdin, STDIN_FILENO);
+					close(fdin);
+                // Execute command
+				} if (execvp(cmd2[0], cmd2) < 0) {
+					printf("\nCould not execute command 2..");
+					exit(0);
+				}
+            // Parent waits
+			} else {
+                int status;
+                close(pipefd[0]);
+                close(pipefd[1]);
+                if(bg == 0) {
+                    waitpid(pid1, &status, 0);
+                    waitpid(pid2, &status, 0);
+                }
+                return 1;
+			}
+		}
+	}
+    return 1;
 }
- 
-// function for finding cmd func
-int parseFunc(char** args, char** parsed)
-{
-    int i = 0;
-    int flag = 0;
+
+/*
+ * Function:	int launchCommand(char**)
+ * Description:	Launches commands using the proper
+ *				run flags; parses args and runs
+ *				commands based on order
+ */
+int launchCommand(char** args) {
+	
+	int i = 0;
+	int cmd1index = 0;
+	int cmd2index = 0;
+	char** cmd1 = malloc(BUFSIZE * sizeof(char*));
+	char** cmd2 = malloc(BUFSIZE * sizeof(char*));
+	char* infile1 = "\0";
+	char* outfile1 = "\0";
+	char* appendfile1 = "\0";
+	char* infile2 = "\0";
+	char* outfile2 = "\0";
+	char* appendfile2 = "\0";
+	int outflag = 0;
+	int inflag = 0;
+	int appendflag = 0;
+	int pipeflag = 0;
+    int bg = 0;
     
     while(args[i] != NULL) {
-        if(strcmp(args[i], "|") == 0) {
-            flag = 1;
-            i++;
-            parsed[i] = args[i];
-        } else if(strcmp(args[i], ">") == 0) {
-            flag = 2;
-            i++;
-            parsed[i] = args[i];
-        } else if(strcmp(args[i], ">>") == 0) {
-            flag = 3;
-            i++;
-            parsed[i] = args[i];
-        } else if(strcmp(args[i], "<") == 0) {
-            flag = 4;
-            i++;
-            parsed[i] = args[i];
-        } else {
-            parsed[i] = args[i];
+        if(strcmp(args[i], "&") == 0) {
+            bg = 1;
         }
         i++;
     }
-    
-    return flag + 1;
+    i = 0;
+	while(args[i] != NULL) {
+		if(outflag == 0 && inflag == 0 && appendflag == 0) {
+			if(strcmp(args[i], ">") == 0) {
+				outflag = 1;
+			} else if(strcmp(args[i], "<") == 0) {
+				inflag = 1;
+			} else if(strcmp(args[i], ">>") == 0) {
+				appendflag = 1;	
+			}
+		}
+	    if(strcmp(args[i],  "|") == 0) {
+			pipeflag = 1;
+			i++;
+		}
+		if(pipeflag == 0) {
+			if(outflag == 1) {
+				i++;
+				outfile1 = args[i];
+				outflag = 0;
+			} else if(inflag == 1) {
+				i++;
+				infile1 = args[i];
+				inflag = 0;
+			} else if(appendflag == 1) {
+				i++;
+				appendfile1 = args[i];
+				appendflag = 0;
+			} else {
+                if(strcmp(args[i], "&") != 0)
+                    cmd1[cmd1index] = args[i];
+				cmd1index++;
+			}
+		} else if(pipeflag == 1) {
+			if(outflag == 1) {
+				i++;
+				outfile2 = args[i];
+				outflag = 0;
+			} else if(inflag == 1) {
+				i++;
+				infile2 = args[i];
+				inflag = 0;
+			} else if(appendflag == 1) {
+				i++;
+				appendfile2 = args[i];
+				appendflag = 0;
+			} else {
+                if(strcmp(args[i], "&") != 0)
+                    cmd2[cmd2index] = args[i];
+				cmd2index++;
+			}
+		}
+	i++;
+	}
+	
+	executeCommand(cmd1, cmd2, infile1, infile2, outfile1, outfile2, appendfile1, appendfile2, bg);
+	return 1;
 }
 
 /*
- *
- *
+ * Function:	int main()
+ * Description:	Main function. Contains the
+ *				main while loop responsible for
+ *				parsing commands input by the user.
  */
-#define LSH_TOK_BUFSIZE 64
-#define LSH_TOK_DELIM " \t\r\n\a"
-char **lsh_split_line(char *line)
-{
-    int bufsize = LSH_TOK_BUFSIZE, position = 0;
-    char **tokens = malloc(bufsize * sizeof(char*));
-    char *token;
-    
-    if (!tokens) {
-        fprintf(stderr, "lsh: allocation error\n");
-        exit(EXIT_FAILURE);
-    }
-    
-    token = strtok(line, LSH_TOK_DELIM);
-    while (token != NULL) {
-        tokens[position] = token;
-        position++;
-        
-        if (position >= bufsize) {
-            bufsize += LSH_TOK_BUFSIZE;
-            tokens = realloc(tokens, bufsize * sizeof(char*));
-            if (!tokens) {
-                fprintf(stderr, "lsh: allocation error\n");
-                exit(EXIT_FAILURE);
-            }
-        }
-        
-        token = strtok(NULL, LSH_TOK_DELIM);
-    }
-    tokens[position] = NULL;
-    return tokens;
-}
- 
-int main()
-{
-    int execFlag = 0;
-    char *inputString, **inputArgs;
-    char *parsedArgs[MAXLIST];
-    while (1) {
-        // Ignore SIGINT
+int main() {
+	
+	char* line;
+	char** args;
+	
+	while(1) {
         signal(SIGINT, SIG_IGN);
-        // print shell line
-        printDir(); 
-        // take input
-        inputString = takeInput();
-        if (inputString == NULL)
-            continue;
-        // process
-        inputArgs = lsh_split_line(inputString);
-        execFlag = parseFunc(inputArgs, parsedArgs);
-        // execflag returns zero if there is no command
-        // or it is a builtin command,
-        // 1 if it is a simple command
-        // 2 if it is including a pipe.
-        // 3 if it includes output redirection.
-        // 4 if it includes append.
-        // 5 if it includes input redirection.
-        
-        // execute
-        if(execFlag == 1) {
-            if(!ownCmdHandler(parsedArgs)) {
-                execArgs(parsedArgs);
-            }
-        }
- 
-        if(execFlag == 2)
-            execArgsPiped(inputArgs, parsedArgs);
-
-        if(execFlag == 3)
-            execArgsOutRedir(inputArgs, parsedArgs);
-
-        if(execFlag == 4)
-            execArgsAppend(inputArgs, parsedArgs);
-
-        if(execFlag == 5)
-            execArgsInRedir(inputArgs, parsedArgs);
-
+		line = readCommand();
+		if(line == NULL) {
+			continue;
+		}
+		args = splitLine(line);
+		launchCommand(args);
         offset++;
-    }
-    return 0;
+	}
+	return 0;
 }
